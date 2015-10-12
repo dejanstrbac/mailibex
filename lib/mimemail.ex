@@ -6,11 +6,11 @@ defmodule MimeMail do
   defstruct headers: [], body: ""
 
   def from_string(data) do
-    if String.match?(data, ~r/\r/) do
-      [headers,body]= String.split(data,"\r\n\r\n",parts: 2)
-    else
-      [headers,body]= String.split(data,"\n\n",parts: 2)
-    end
+
+    unless String.match?(data, ~r/\r\n/), do: data = String.replace(data, ~r/\n/, "\r\n")
+
+    [headers,body]= String.split(data,"\r\n\r\n",parts: 2)
+
     headers=headers
     |> String.replace(~r/\r\n([^\t ])/,"\r\n!\\1")
     |> String.split("\r\n!")
