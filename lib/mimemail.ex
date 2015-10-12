@@ -6,7 +6,11 @@ defmodule MimeMail do
   defstruct headers: [], body: ""
 
   def from_string(data) do
-    [headers,body]= String.split(data,"\r\n\r\n",parts: 2)
+    if String.match?(data, ~r/\r/) do
+      [headers,body]= String.split(data,"\r\n\r\n",parts: 2)
+    else
+      [headers,body]= String.split(data,"\n\n",parts: 2)
+    end
     headers=headers
     |> String.replace(~r/\r\n([^\t ])/,"\r\n!\\1")
     |> String.split("\r\n!")
@@ -39,7 +43,7 @@ defmodule MimeMail do
       _ -> body
     end
     body = case headers[:'content-type'] do
-      {"multipart/"<>_,%{boundary: bound}}-> 
+      {"multipart/"<>_,%{boundary: bound}}->
         body |> String.split(~r"\s*--#{bound}\s*") |> Enum.slice(1..-2) |> Enum.map(&from_string/1) |> Enum.map(&decode_body/1)
       {"text/"<>_,%{charset: charset}} ->
         body |> Iconv.conv(charset,"utf8") |> ok_or(ensure_ascii(body)) |> ensure_utf8
@@ -53,7 +57,7 @@ defmodule MimeMail do
   def encode_body(%MimeMail{body: body}=mail) when is_binary(body) do
     mail = MimeMail.CTParams.decode_headers(mail)
     case mail.headers[:'content-type'] do
-      {"text/"<>_=type,params}-> 
+      {"text/"<>_=type,params}->
         headers = Dict.drop(mail.headers,[:'content-type',:'content-transfer-encoding']) ++[
           'content-type': {type,Dict.put(params,:charset,"utf-8")},
           'content-transfer-encoding': "quoted-printable"
@@ -93,19 +97,19 @@ defmodule MimeMail do
   defp chunk_line(<<vline::size(74)-binary,?=,rest::binary>>), do: (vline<>"=\r\n"<>chunk_line("="<>rest))
   defp chunk_line(<<vline::size(75)-binary,rest::binary>>), do: (vline<>"=\r\n"<>chunk_line(rest))
   defp chunk_line(other), do: other
-  
-  def qp_to_binary(str), do: 
+
+  def qp_to_binary(str), do:
     (str |> String.rstrip |> String.rstrip(?=) |> qp_to_binary([]))
-  def qp_to_binary("=\r\n"<>rest,acc), do: 
+  def qp_to_binary("=\r\n"<>rest,acc), do:
     qp_to_binary(rest,acc)
-  def qp_to_binary(<<?=,x1,x2>><>rest,acc), do: 
+  def qp_to_binary(<<?=,x1,x2>><>rest,acc), do:
     qp_to_binary(rest,[<<x1,x2>> |> String.upcase |> Base.decode16! | acc])
   def qp_to_binary(<<c,rest::binary>>,acc), do:
     qp_to_binary(rest,[c | acc])
   def qp_to_binary("",acc), do:
     (acc |> Enum.reverse |> IO.iodata_to_binary)
 
-  def unfold_header(value), do: 
+  def unfold_header(value), do:
     String.replace(value,~r/\r\n([\t ])/,"\\1")
 
   def fold_header(header), do:
@@ -130,7 +134,7 @@ defmodule MimeMail do
   def ensure_ascii(bin), do:
     Kernel.to_string(for(<<c<-bin>>, (c<127 and c>31) or c in [?\t,?\r,?\n], do: c))
   def ensure_utf8(bin) do
-    bin 
+    bin
     |> String.chunk(:printable)
     |> Enum.filter(&String.printable?/1)
     |> Kernel.to_string
